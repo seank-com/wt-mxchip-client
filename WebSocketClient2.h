@@ -13,11 +13,13 @@
 #define _WS_DEBUG
 
 #ifdef _WS_DEBUG
-#define INFO_FORMAT(format, args...) do {char buf[250];sprintf(buf, format, args);printf(buf);} while(0);
-#define ERROR_FORMAT(format, args...) do {char buf[250];sprintf(buf, format, args);printf(buf);} while(0);
+#include "Arduino.h"
 
-#define INFO(x) do {  } while(0);
-#define ERROR(x) do {  } while(0);
+#define INFO_FORMAT(format, args...) do {char buf[250];sprintf(buf, format, args);Serial.println(buf);} while(0);
+#define ERROR_FORMAT(format, args...) do {char buf[250];sprintf(buf, format, args);Serial.println(buf);} while(0);
+
+#define INFO(x) do {Serial.println(x);} while(0);
+#define ERROR(x) do {Serial.println(x);} while(0);
 #else
 #define INFO_FORMAT(format, args...) do {} while(0);
 #define ERROR_FORMAT(format, args...) do {} while(0);

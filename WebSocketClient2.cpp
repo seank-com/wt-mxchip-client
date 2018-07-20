@@ -1,4 +1,5 @@
 #include "WebSocketClient2.h"
+#include "Arduino.h"
 
 #define MAX_TRY_WRITE 30
 #define MAX_TRY_READ 10
@@ -166,13 +167,16 @@ int WebSocketClient::sendLength(long len, char *msg)
     // (the most significant bit MUST be 0) are the payload length.
     else
     {
+        INFO_FORMAT("sendLength for length %d", len);
         msg[0] = 127 | (1 << 7);
-        for (int i = 0; i < 8; i++)
-        {
-            // Actually, we only support message size less than 2^32
-            int shift = i * 8 > 32 ? 32 : i * 8;
-            msg[i + 1] = (len >> shift) & 0xff;
-        }
+        msg[1] = 0;
+        msg[2] = 0;
+        msg[3] = 0;
+        msg[4] = 0;
+        msg[5] = (len >> 24) & 0xff;
+        msg[6] = (len >> 16) & 0xff;
+        msg[7] = (len >> 8) & 0xff;
+        msg[8] = len & 0xff;
         return 9;
     }
 }
@@ -297,19 +301,18 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
 
     // Read opcode
     timer.start();
+    _tcpSocket->set_timeout(2000);
     while (true)
     {
         if (timer.read_ms() > TIMEOUT_IN_MS)
         {
-            ERROR("WebSocket receive timeout\r\n");
+            ERROR("WebSocket receive timeout");
             return NULL;
         }
 
         int res = _tcpSocket->recv(&recvByte, 1);
-
         if (res == 1)
         {
-            _tcpSocket->set_timeout(2000);
             opcode = recvByte & 0x7F;
 
             // opcode for data frames
@@ -330,11 +333,14 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
             // opcode for connection close
             else if (opcode == WS_OPCODE_CLOSE)
             {
+                INFO("received close");
                 close();
             }
             else if (opcode == WS_OPCODE_PING)
             {
+                INFO("received ping");
                 isPing = true;
+                break;
             }
         }
         else if (res < 0 && res != NSAPI_ERROR_WOULD_BLOCK)
@@ -347,6 +353,7 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
             return NULL;
         }
     }
+    _tcpSocket->set_blocking(true);
 
     // Parse payload length
     readChar(&c);
@@ -370,9 +377,11 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
             payloadLength += (c << shift);
         }
     }
+    INFO_FORMAT("Frame length:%d ismasked:%d", payloadLength, isMasked);
 
     if (payloadLength == 0)
     {
+        INFO("payloadLength is 0");
         return NULL;
     }
     else if (payloadLength > size)
@@ -383,6 +392,7 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
 
     if (isMasked)
     {
+        INFO("Payload is masked");
         for (i = 0; i < 4; i++)
         {
             readChar(&c);
@@ -391,9 +401,12 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
     }
 
     int nb = read(msgBuffer, payloadLength, payloadLength);
-    if (nb != payloadLength)
+    if (nb != payloadLength) {
+        INFO("read returned 0");
         return NULL;
+    }
 
+    INFO("apply mask");
     for (i = 0; i < payloadLength; i++)
     {
         msgBuffer[i] = msgBuffer[i] ^ mask[i % 4];
@@ -404,10 +417,12 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
     WebSocketReceiveResult *receiveResult = NULL;
     if (isPing)
     {
+        INFO("sending pong");
         send(msgBuffer, payloadLength, WS_Message_Pong);
     }
     else
     {
+        INFO("create result");
         receiveResult = new WebSocketReceiveResult();
         receiveResult->isEndOfMessage = isFinal;
         receiveResult->length = payloadLength;
@@ -455,6 +470,10 @@ int WebSocketClient::write(const char *str, int len)
         {
             continue;
         }
+        else
+        {
+            j = 0;
+        }
 
         idx += res;
 
@@ -475,8 +494,15 @@ int WebSocketClient::read(char *str, int len, int min_len)
 
     for (int j = 0; j < MAX_TRY_WRITE; j++)
     {
-        if ((res = _tcpSocket->recv(str + idx, len - idx)) < 0)
+        res = _tcpSocket->recv(str + idx, len - idx);
+        if (res < 0)
+        {
             continue;
+        }
+        else
+        {
+            j = 0;
+        }
 
         idx += res;
 

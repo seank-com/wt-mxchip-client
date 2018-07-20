@@ -1,7 +1,7 @@
+#include "AudioClassV2.h"
 #include "AZ3166WiFi.h"
 #include "Arduino.h"
 #include "WebSocketClient2.h"
-#include "AudioClassV2.h"
 #include "RGB_LED.h"
 
 #define MAX_RECORD_DURATION 5
@@ -91,6 +91,7 @@ static void EnterIdleState()
 static void DoIdle()
 {
   //memset(waveFile, 0, AUDIO_BUFFER_SIZE);
+  Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
 
   if (digitalRead(USER_BUTTON_B) == LOW)
   {
@@ -100,7 +101,7 @@ static void DoIdle()
     Screen.print(1, "Release to send");
     rgbLED.setColor(255,0,0);
 
-    Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
+    //Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
     Audio.startRecord(waveFile, AUDIO_BUFFER_SIZE);
     status = Recording;
   }
@@ -109,6 +110,13 @@ static void DoIdle()
     WebSocketReceiveResult *recvResult = wsClient->receive(waveFile, AUDIO_BUFFER_SIZE);
     if (recvResult != NULL)
     {
+      Serial.print("Received Message, length:");
+      Serial.print(recvResult->length);
+      Serial.print(" type:");
+      Serial.print((recvResult->messageType == WS_Message_Binary) ? "binary" : "text");
+      Serial.print(" final:");
+      Serial.println(recvResult->isEndOfMessage);
+
       if (recvResult->length > 0 && recvResult->isEndOfMessage)
       {
         // Enter the Play mode
@@ -137,20 +145,11 @@ static void DoRecorded()
   wavFileSize = Audio.getCurrentSize();
   if (wavFileSize > 0)
   {
-    wavFileSize = Audio.convertToMono(waveFile, wavFileSize, BITS_PER_SAMPLE);
-    if (wavFileSize <= 0)
-    {
-      Serial.println("ConvertToMono failed! ");
-      EnterIdleState();
-    }
-    else
-    {
-      Screen.clean();
-      Screen.print(0, "Processing...");
-      Screen.print(1, "Sending...");
+    Screen.clean();
+    Screen.print(0, "Processing...");
+    Screen.print(1, "Sending...");
 
-      status = Sending;
-    }
+    status = Sending;
   }
   else
   {
@@ -181,6 +180,9 @@ void setup()
 {
   hasWifi = false;
   isWsConnected = false;
+
+  Screen.init();
+  Serial.begin(115200);
 
   initWiFi();
   if (hasWifi)
