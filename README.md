@@ -5,6 +5,7 @@ A WebSocket client for the MXChip arduino that accepts WAV files and plays them
 
 Follow the [Getting Started](https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-arduino-iot-devkit-az3166-get-started) guide for your OS.
 
+__WORKING_NOTES__
 
 https://github.com/Microsoft/devkit-sdk/
 https://microsoft.github.io/azure-iot-developer-kit/docs/get-started/

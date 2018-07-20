@@ -406,7 +406,7 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
         return NULL;
     }
 
-    INFO("apply mask");
+    INFO("applying mask");
     for (i = 0; i < payloadLength; i++)
     {
         msgBuffer[i] = msgBuffer[i] ^ mask[i % 4];
