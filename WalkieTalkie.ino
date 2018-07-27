@@ -20,6 +20,7 @@ enum STATUS
   Recording,
   Recorded,
   Sending,
+  Receiving,
   Playing
 };
 
@@ -35,6 +36,7 @@ static WebSocketClient *wsClient = NULL;
 
 static AudioClass& Audio = AudioClass::getInstance();
 static int wavFileSize;
+static int offset;
 static char *waveFile = NULL;
 
 static void initWiFi()
@@ -88,6 +90,17 @@ static void EnterIdleState()
   rgbLED.turnOff();
 }
 
+static void EnterPlayingState(int size)
+{
+  // Enter the Play mode
+  Screen.clean();
+  Screen.print(0, "Playing...");
+  rgbLED.setColor(0,255,0);
+
+  Audio.startPlay(waveFile, size);
+  status = Playing;
+}
+
 static void DoIdle()
 {
   //memset(waveFile, 0, AUDIO_BUFFER_SIZE);
@@ -119,13 +132,16 @@ static void DoIdle()
 
       if (recvResult->length > 0 && recvResult->isEndOfMessage)
       {
-        // Enter the Play mode
+        EnterPlayingState(recvResult->length);
+      }
+      else if (recvResult->length > 0)
+      {
+        // Enter the Receiving mode
         Screen.clean();
-        Screen.print(0, "Playing...");
-        rgbLED.setColor(0,255,0);
-
-        Audio.startPlay(waveFile, recvResult->length);
-        status = Playing;
+        Screen.print(0, "Receiving...");
+        rgbLED.setColor(0,0,255);
+        offset = recvResult->length;
+        status = Receiving;
       }
     }
   }
@@ -166,6 +182,30 @@ static void DoSending()
     Serial.println("Sending failed.");
   }
   EnterIdleState();
+}
+
+static void DoReceiving()
+{
+  int size = AUDIO_BUFFER_SIZE - offset;
+  WebSocketReceiveResult *recvResult = wsClient->receive(waveFile + offset, size);
+  if (recvResult != NULL)
+  {
+    Serial.print("Received Message, length:");
+    Serial.print(recvResult->length);
+    Serial.print(" type:");
+    Serial.print((recvResult->messageType == WS_Message_Binary) ? "binary" : "text");
+    Serial.print(" final:");
+    Serial.println(recvResult->isEndOfMessage);
+
+    if (recvResult->length > 0 && recvResult->isEndOfMessage)
+    {
+      EnterPlayingState(offset + recvResult->length);
+    }
+    else if (recvResult->length > 0)
+    {
+      offset += recvResult->length;
+    }
+  }
 }
 
 static void DoPlaying()
@@ -226,6 +266,9 @@ void loop()
         break;
       case Sending:
         DoSending();
+        break;
+      case Receiving:
+        DoReceiving();
         break;
       case Playing:
         DoPlaying();
