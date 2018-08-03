@@ -1,5 +1,4 @@
 #include "WebSocketClient2.h"
-#include "Arduino.h"
 
 #define MAX_TRY_WRITE 30
 #define MAX_TRY_READ 10
@@ -9,6 +8,8 @@
 // according to the WebSockeet protocol defenition (see https://tools.ietf.org/html/rfc6455#section-1.3)
 const char WS_HANDSHAKE_CLIENT_KEY[] = "L159VM0TWUzyDxwJEIEzjw==";
 const char WS_HANDSHAKE_SERVER_ACCEPT[] = "DdLWT/1JcX+nQFHebYP+rqEx5xI=";
+
+static WebSocketReceiveResult receiveResult;
 
 WebSocketClient::WebSocketClient(char *url)
 {
@@ -21,7 +22,7 @@ WebSocketClient::WebSocketClient(char *url)
     {
         if (strcmp(_parsedUrl->schema(), "ws") == 0)
         {
-            _port = 80;
+            _port = _parsedUrl->port();
         }
         else
         {
@@ -47,7 +48,7 @@ WebSocketClient::~WebSocketClient()
     }
 }
 
-bool WebSocketClient::connect()
+bool WebSocketClient::connect(int timeout)
 {
     if (_tcpSocket != NULL)
     {
@@ -74,10 +75,10 @@ bool WebSocketClient::connect()
         _tcpSocket->set_timeout(1000);
     }
 
-    return doHandshake();
+    return doHandshake(timeout);
 }
 
-bool WebSocketClient::doHandshake()
+bool WebSocketClient::doHandshake(int timeout)
 {
     char strBuffer[200];
 
@@ -135,7 +136,7 @@ bool WebSocketClient::doHandshake()
                 return true;
             }
         }
-    } while (ret > 0 && timer.read_ms() < TIMEOUT_IN_MS);
+    } while (ret > 0 && timer.read_ms() < timeout);
 
     return false;
 }
@@ -220,6 +221,10 @@ int WebSocketClient::send(const char *str, long size, WS_Message_Type messageTyp
     {
         opcode = WS_OPCODE_PONG | WS_FINAL_BIT;
     }
+    else if (messageType == WS_Message_Close)
+    {
+        opcode = WS_OPCODE_CLOSE | WS_FINAL_BIT;
+    }
     else
     {
         if (_firstFrame)
@@ -274,7 +279,7 @@ int WebSocketClient::sendPing(char * str, int size)
     return send(str, size, WS_Message_Ping);
 }
 
-WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
+WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size, int timeout)
 {
     if (_tcpSocket == NULL)
     {
@@ -296,18 +301,23 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
     char mask[4] = {0, 0, 0, 0};
     bool isMasked = false;
     bool isFinal = false;
-    bool isPing = false;
     Timer timer;
+
+    receiveResult.isEndOfMessage = true;
+    receiveResult.length = 0;
+    receiveResult.messageType = WS_Message_Text;
 
     // Read opcode
     timer.start();
-    _tcpSocket->set_timeout(2000);
+    _tcpSocket->set_timeout(timeout);
     while (true)
     {
-        if (timer.read_ms() > TIMEOUT_IN_MS)
+        if (timer.read_ms() > timeout)
         {
-            ERROR("WebSocket receive timeout");
-            return NULL;
+            // A timeout is not an error when you are polling
+            INFO("WebSocket receive timeout");
+            receiveResult.messageType = WS_Message_Timeout;        
+            return &receiveResult;
         }
 
         int res = _tcpSocket->recv(&recvByte, 1);
@@ -334,12 +344,19 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
             else if (opcode == WS_OPCODE_CLOSE)
             {
                 INFO("received close");
-                close();
+                _messageType = WS_Message_Close;        
+                break;
             }
             else if (opcode == WS_OPCODE_PING)
             {
                 INFO("received ping");
-                isPing = true;
+                _messageType = WS_Message_Ping;
+                break;
+            }
+            else if (opcode == WS_OPCODE_PONG)
+            {
+                INFO("received ping");
+                _messageType = WS_Message_Ping;
                 break;
             }
         }
@@ -368,27 +385,20 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
     }
     else if (payloadLength == 127)
     {
-        payloadLength = 0;
-        for (int i = 0; i < 8; i++)
-        {
-            readChar(&c);
-
-            int shift = (7 - i) * 8 > 32 ? 32 : (7 - i) * 8;
-            payloadLength += (c << shift);
-        }
+        readChar(&c); // 0
+        readChar(&c); // 0
+        readChar(&c); // 0
+        readChar(&c); // 0
+        readChar(&c);
+        payloadLength = c << 24;
+        readChar(&c);
+        payloadLength += c << 16;
+        readChar(&c);
+        payloadLength += c << 8;
+        readChar(&c);
+        payloadLength += c;
     }
     INFO_FORMAT("Frame length:%d ismasked:%d", payloadLength, isMasked);
-
-    if (payloadLength == 0)
-    {
-        INFO("payloadLength is 0");
-        return NULL;
-    }
-    else if (payloadLength > size)
-    {
-        ERROR("Message payload is too big.");
-        return NULL;
-    }
 
     if (isMasked)
     {
@@ -400,42 +410,72 @@ WebSocketReceiveResult *WebSocketClient::receive(char *msgBuffer, int size)
         }
     }
 
-    int nb = read(msgBuffer, payloadLength, payloadLength);
-    if (nb != payloadLength) {
-        INFO("read returned 0");
-        return NULL;
-    }
-
-    INFO("applying mask");
-    for (i = 0; i < payloadLength; i++)
+    if (payloadLength > 0)
     {
-        msgBuffer[i] = msgBuffer[i] ^ mask[i % 4];
+        int len = payloadLength;
+        if (payloadLength > size)
+        {
+            len = size;
+        }
+
+        int nb = read(msgBuffer, len, len);
+        if (nb != len) 
+        {
+            ERROR("read failed");
+            return NULL;
+        }
+
+        if (payloadLength > size)
+        {
+            for (i = len; i < payloadLength; i += 1)
+            {
+                readChar(&c);
+            }
+            _messageType = WS_Message_BufferOverrun;
+        }
+
+        INFO("applying mask");
+        for (i = 0; i < len; i++)
+        {
+            msgBuffer[i] = msgBuffer[i] ^ mask[i % 4];
+        }
+        msgBuffer[len] = '\0';
     }
 
-    msgBuffer[payloadLength] = '\0';
-
-    WebSocketReceiveResult *receiveResult = NULL;
-    if (isPing)
+    if (_messageType == WS_Message_Ping)
     {
         INFO("sending pong");
         send(msgBuffer, payloadLength, WS_Message_Pong);
     }
-    else
+    else if (_messageType == WS_Message_Close)
     {
-        INFO("create result");
-        receiveResult = new WebSocketReceiveResult();
-        receiveResult->isEndOfMessage = isFinal;
-        receiveResult->length = payloadLength;
-        receiveResult->messageType = _messageType;        
+        INFO("closing connection");
+        close();
     }
 
-    return receiveResult;
+    receiveResult.isEndOfMessage = isFinal;
+    receiveResult.length = payloadLength;
+    receiveResult.messageType = _messageType;        
+    if (_messageType == WS_Message_Ping ||
+        _messageType == WS_Message_Close ||
+        _messageType == WS_Message_Timeout)
+    {
+        // For backwards compatibility with samples
+        // return a length of 0 for any new message
+        // types that old code could receive.
+        // Since pings are automatically handled above
+        // the user should not need the ping data.
+        receiveResult.length = 0;
+    }
+
+    return &receiveResult;
 }
 
 bool WebSocketClient::close()
 {
-    // Send a close frame (0x8700) to server to tell it client is closing from here.
-    write((uint8_t)0x8700, 8);
+    // Send a close frame to the server to tell 
+    // it the client is closing from here.
+    return send("*", 1, WS_Message_Close);
 
     if (_tcpSocket == NULL)
     {
@@ -472,6 +512,7 @@ int WebSocketClient::write(const char *str, int len)
         }
         else
         {
+            // reset the retry count since we sent something
             j = 0;
         }
 
@@ -501,6 +542,7 @@ int WebSocketClient::read(char *str, int len, int min_len)
         }
         else
         {
+            // reset the retry count since we received something
             j = 0;
         }
 

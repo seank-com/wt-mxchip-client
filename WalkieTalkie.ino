@@ -31,7 +31,7 @@ static STATUS status = Idle;
 static bool hasWifi;
 static bool isWsConnected;
 
-static char webSocketServerUrl[] = "ws://192.168.1.101:8686/";
+static char webSocketServerUrl[] = "ws://192.168.1.6:8686/";
 static WebSocketClient *wsClient = NULL;
 
 static AudioClass& Audio = AudioClass::getInstance();
@@ -46,8 +46,17 @@ static void initWiFi()
 
   if (WiFi.begin() == WL_CONNECTED)
   {
+    unsigned char mac[WL_MAC_ADDR_LENGTH];
+    WiFi.macAddress(mac);
+
+    char buf[250];
+    sprintf(buf, "%x:%x:%x:%x:%x:%x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    Serial.println(buf);
+
     IPAddress ip = WiFi.localIP();
     Screen.print(1, ip.get_address());
+    Serial.println(ip.get_address());
+
     hasWifi = true;
     Screen.print(2, "Connected");
   }
@@ -103,9 +112,6 @@ static void EnterPlayingState(int size)
 
 static void DoIdle()
 {
-  //memset(waveFile, 0, AUDIO_BUFFER_SIZE);
-  Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
-
   if (digitalRead(USER_BUTTON_B) == LOW)
   {
     // Enter the Recording mode
@@ -114,34 +120,37 @@ static void DoIdle()
     Screen.print(1, "Release to send");
     rgbLED.setColor(255,0,0);
 
-    //Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
+    Audio.format(SAMPLE_RATE, BITS_PER_SAMPLE);
     Audio.startRecord(waveFile, AUDIO_BUFFER_SIZE);
     status = Recording;
   }
   else
   {
-    WebSocketReceiveResult *recvResult = wsClient->receive(waveFile, AUDIO_BUFFER_SIZE);
+    WebSocketReceiveResult *recvResult = wsClient->receive(waveFile, AUDIO_BUFFER_SIZE, 1000);
     if (recvResult != NULL)
     {
-      Serial.print("Received Message, length:");
-      Serial.print(recvResult->length);
-      Serial.print(" type:");
-      Serial.print((recvResult->messageType == WS_Message_Binary) ? "binary" : "text");
-      Serial.print(" final:");
-      Serial.println(recvResult->isEndOfMessage);
+      if (recvResult->length > 0)
+      {
+        Serial.print("Received Message, length:");
+        Serial.print(recvResult->length);
+        Serial.print(" type:");
+        Serial.print((recvResult->messageType == WS_Message_Binary) ? "binary" : "text");
+        Serial.print(" final:");
+        Serial.println(recvResult->isEndOfMessage);
 
-      if (recvResult->length > 0 && recvResult->isEndOfMessage)
-      {
-        EnterPlayingState(recvResult->length);
-      }
-      else if (recvResult->length > 0)
-      {
-        // Enter the Receiving mode
-        Screen.clean();
-        Screen.print(0, "Receiving...");
-        rgbLED.setColor(0,0,255);
-        offset = recvResult->length;
-        status = Receiving;
+        if (recvResult->isEndOfMessage)
+        {
+          EnterPlayingState(recvResult->length);
+        }
+        else
+        {
+          // Enter the Receiving mode
+          Screen.clean();
+          Screen.print(0, "Receiving...");
+          rgbLED.setColor(0,0,255);
+          offset = recvResult->length;
+          status = Receiving;
+        }
       }
     }
   }
@@ -244,8 +253,7 @@ void loop()
 {
   if (hasWifi)
   {
-    isWsConnected = wsClient->connected();
-    if (!isWsConnected)
+    if (wsClient == NULL || (isWsConnected = wsClient->connected()) == false)
     {
       Screen.clean();
       Screen.print("Reboot....");
