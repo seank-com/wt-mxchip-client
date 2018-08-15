@@ -140,7 +140,12 @@ static void DoIdle()
 
         if (recvResult->isEndOfMessage)
         {
-          EnterPlayingState(recvResult->length);
+          int len = recvResult->length;
+          if (recvResult->length > AUDIO_BUFFER_SIZE)
+          {
+            len = AUDIO_BUFFER_SIZE;
+          } 
+          EnterPlayingState(len);
         }
         else
         {
@@ -196,6 +201,12 @@ static void DoSending()
 static void DoReceiving()
 {
   int size = AUDIO_BUFFER_SIZE - offset;
+  if (offset > AUDIO_BUFFER_SIZE)
+  {
+    offset = AUDIO_BUFFER_SIZE - 1;
+    size = 1;
+  }
+
   WebSocketReceiveResult *recvResult = wsClient->receive(waveFile + offset, size);
   if (recvResult != NULL)
   {
