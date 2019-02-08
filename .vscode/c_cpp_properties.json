@@ -3,6 +3,8 @@
         {
             "name": "Mac",
             "includePath": [
+                "/Users/seank/Library/Arduino15/packages/AZ3166/tools/**",
+                "/Users/seank/Library/Arduino15/packages/AZ3166/hardware/stm32f4/1.3.7/**",
                 "/Users/seank/Library/Arduino15/packages/AZ3166/hardware/stm32f4/1.3.7/cores/arduino",
                 "${workspaceRoot}",
                 "/Applications/hardware/tools",

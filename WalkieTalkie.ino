@@ -1,7 +1,7 @@
 #include "AudioClassV2.h"
 #include "AZ3166WiFi.h"
 #include "Arduino.h"
-#include "WebSocketClient2.h"
+#include "WebSocketClient.h"
 #include "RGB_LED.h"
 
 #define MAX_RECORD_DURATION 5
@@ -31,7 +31,7 @@ static STATUS status = Idle;
 static bool hasWifi;
 static bool isWsConnected;
 
-static char webSocketServerUrl[] = "ws://192.168.1.6:8686/";
+static char webSocketServerUrl[] = "ws://192.168.1.104:8686/";
 static WebSocketClient *wsClient = NULL;
 
 static AudioClass& Audio = AudioClass::getInstance();
